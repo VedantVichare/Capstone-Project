@@ -23,12 +23,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from PIL import Image
 import uvicorn
+from pydantic import BaseModel
 
 # ── your existing modules ────────────────────────────────────────────────────
 # Make sure inference.py and report_generation2.py are in the same folder as
 # this file (or on PYTHONPATH).
 import inference as inf
 import report_generation as rg
+from chatbot.report_chatbot import ask_report_chatbot
+from chatbot.rag_chain import ask_knowledge_chatbot, _load_resources
+
+class ReportChatRequest(BaseModel):
+    question: str
+    report:   dict
+    history:  list[dict] = [] 
+
+
+class KnowledgeChatRequest(BaseModel):
+    question: str
+    history:  list[dict] = []
 
 # ── App setup ────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -202,7 +215,65 @@ async def analyze(file: UploadFile = File(...)):
                     candidate.unlink()
             except Exception:
                 pass    # best-effort cleanup
+            
 
+@app.on_event("startup")
+async def startup_event():
+    print("[startup] Loading RAG knowledge base...")
+    _load_resources()
+    print("[startup] RAG knowledge base ready")
+
+
+@app.post("/report-chat", tags=["Chatbot"])
+async def report_chat(req: ReportChatRequest):
+    """
+    Accept a question + the report JSON + optional conversation history.
+    Returns the assistant's reply grounded strictly in the report.
+ 
+    Request body:
+    {
+        "question": "What does the Effusion finding mean?",
+        "report":   { ...full report JSON from /analyze... },
+        "history":  []   // pass previous turns for multi-turn conversations
+    }
+    """
+    try:
+        answer = ask_report_chatbot(
+            report=req.report,
+            question=req.question,
+            history=req.history,
+        )
+        return {"answer": answer}
+ 
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chatbot error: {str(exc)}"
+        )
+
+
+@app.post("/knowledge-chat", tags=["Chatbot"])
+async def knowledge_chat(req: KnowledgeChatRequest):
+    try:
+        answer = ask_knowledge_chatbot(
+            question=req.question,
+            history=req.history,
+        )
+        return {"answer": answer}
+
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Knowledge chatbot error: {str(exc)}"
+        )
 
 # ── Entry point (optional — you can also use `uvicorn main:app`) ──────────────
 if __name__ == "__main__":

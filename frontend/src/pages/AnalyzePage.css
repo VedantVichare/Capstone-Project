@@ -4,6 +4,10 @@
   position: relative;
 }
 
+/* push page content left of the chatbot sidebar */
+.lp { padding-right: 320px; }
+.ap { padding-right: 320px; }
+
 /* ── background ── */
 .ap-bg {
   position: fixed;

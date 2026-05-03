@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './AnalyzePage.css'
+import ReportChatbot from '../components/ReportChatbot'
+import KnowledgeChatbot from '../components/KnowledgeChatbot'
 
 const API_URL = 'http://localhost:8000/analyze'
 
@@ -293,9 +295,12 @@ export default function AnalyzePage() {
               </div>
             )}
 
+            <ReportChatbot report={result.report} />
+
           </div>
         )}
       </div>
+      <KnowledgeChatbot />
     </div>
   )
 }
