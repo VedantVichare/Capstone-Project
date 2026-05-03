@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import './LandingPage.css'
+import previewImg from '../assets/dashboard-preview.png'
 
 const CONDITIONS = [
   'Atelectasis', 'Cardiomegaly', 'Effusion', 'Infiltration', 'Mass', 'Nodule',
@@ -52,7 +53,7 @@ export default function LandingPage() {
           <span className="lp-cross">✚</span> PneumaVision
         </div>
         <button className="lp-nav-btn" onClick={() => navigate('/analyze')}>
-          Try It Free →
+          Analyze Your X-Ray
         </button>
       </nav>
 
@@ -62,42 +63,48 @@ export default function LandingPage() {
       <section className="lp-fold lp-fold1">
         <div className="lp-fold1-inner">
 
-          {/* hero text */}
-          <div className="lp-hero">
-            <div className="lp-badge">AI-Powered Radiology</div>
-            <h1 className="lp-title">
-              Chest X-Ray Analysis<br />
-              <span className="lp-accent">in Seconds.</span>
-            </h1>
-            <p className="lp-sub">
-              PneumaVision uses a DenseNet121 deep learning model and Grad-CAM
-              visualisation to detect 14 chest conditions — then generates a
-              structured radiology report you can actually understand.
-            </p>
-            <div className="lp-actions">
-              <button className="lp-btn-primary" onClick={() => navigate('/analyze')}>
-                Analyse Your X-Ray
-              </button>
-              <a className="lp-btn-ghost" href="#fold2">See How It Works ↓</a>
+          {/* ── LEFT col: hero text + conditions ── */}
+          <div className="lp-hero-col">
+            <div className="lp-hero">
+              <h1 className="lp-title">
+                Chest X-Ray Analysis in Seconds!<br />
+              </h1>
+              <p className="lp-sub">
+                Our methodology uses a DenseNet121 deep learning model and Grad-CAM
+                visualisation to detect 14 chest conditions — then generates a
+                structured radiology report you can actually understand with the help of an LLM.
+              </p>
+              <div className="lp-actions">
+                <button className="lp-btn-primary" onClick={() => navigate('/analyze')}>
+                  Analyse Your X-Ray
+                </button>
+                <a className="lp-btn-ghost" href="#fold2">See How It Works ↓</a>
+              </div>
+            </div>
+
+            {/* conditions */}
+            <div className="lp-conditions-block">
+              <div className="lp-block-label">14 Conditions Detected</div>
+              <div className="lp-chips">
+                {CONDITIONS.map(c => (
+                  <span className="lp-chip" key={c}>{c}</span>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* conditions */}
-          <div className="lp-conditions-block">
-            <div className="lp-block-label">14 Conditions Detected</div>
-            <div className="lp-chips">
-              {CONDITIONS.map(c => (
-                <span className="lp-chip" key={c}>{c}</span>
-              ))}
+          {/* ── RIGHT col: dashboard preview ── */}
+          <div className="lp-preview-col">
+            <div className="lp-preview-frame">
+              <img
+                src={previewImg}
+                alt="PneumaVision dashboard showing Grad-CAM heatmaps and radiology report"
+                className="lp-preview-img"
+              />
+              <div className="lp-preview-shine" />
             </div>
           </div>
 
-        </div>
-
-        {/* scroll hint */}
-        <div className="lp-scroll-hint" onClick={() => document.getElementById('fold2').scrollIntoView({ behavior: 'smooth' })}>
-          <span>How it works</span>
-          <div className="lp-scroll-arrow">↓</div>
         </div>
       </section>
 
