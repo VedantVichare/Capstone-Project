@@ -1,16 +1,3 @@
-"""
-rag_chain.py  —  RAG retrieval + answer generation
-----------------------------------------------------
-Loads the pre-built ChromaDB vector store from disk (built once by
-build_vectordb.py) and answers user questions using:
-
-  - MMR (Maximum Marginal Relevance) retrieval for diverse, relevant chunks
-  - Gemini LLM to synthesise the retrieved context into a plain-English answer
-  - Strict scoping: only answers from the knowledge base, nothing else
-
-This module is imported by main.py and initialised once at server startup.
-"""
-
 import os
 from pathlib import Path
 from functools import lru_cache
@@ -22,24 +9,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+
 BASE_DIR   = Path(__file__).parent
 CHROMA_DIR = str(BASE_DIR / "chroma_db")
 
-# ── Config ────────────────────────────────────────────────────────────────────
+
 EMBED_MODEL    = "sentence-transformers/all-MiniLM-L6-v2"
 GEMINI_MODEL   = "gemini-3.1-flash-lite-preview"
 API_KEY        = os.environ.get("GEMINI_API_KEY")
 
-# MMR retrieval settings
-# k             : number of chunks to return to the LLM
-# fetch_k       : number of candidates MMR considers before selecting k diverse ones
-# lambda_mult   : 0 = max diversity, 1 = max relevance. 0.6 balances both well
+
 MMR_K          = 5
 MMR_FETCH_K    = 15
 MMR_LAMBDA     = 0.6
 
-# ── System prompt ─────────────────────────────────────────────────────────────
+
 SYSTEM_PROMPT = """You are a helpful medical information assistant for PneumaVision, 
 a chest X-ray analysis application. You have access to a knowledge base covering 
 14 chest conditions that the application can detect.
@@ -59,9 +43,6 @@ Your strict rules:
   radiology, politely redirect them to ask about the 14 conditions covered.
 - You may use bullet points or short paragraphs to make answers easy to read."""
 
-
-# ── Load embeddings and vector store ONCE at module import ────────────────────
-# Using a module-level singleton so FastAPI doesn't reload these on every request
 
 _embeddings  = None
 _vectorstore = None
@@ -130,18 +111,6 @@ Answer based strictly on the context above."""
 
 
 def ask_knowledge_chatbot(question: str, history: list[dict]) -> str:
-    """
-    Public function called by the FastAPI endpoint.
-
-    Parameters
-    ----------
-    question : the user's latest message
-    history  : list of previous turns {"role": "user"|"model", "parts": [str]}
-
-    Returns
-    -------
-    The assistant's answer as a plain string.
-    """
     if not API_KEY:
         raise ValueError("GEMINI_API_KEY not set in environment / .env file.")
 

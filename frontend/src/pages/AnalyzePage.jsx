@@ -1,11 +1,13 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './AnalyzePage.css'
 import ReportChatbot from '../components/ReportChatbot'
 import KnowledgeChatbot from '../components/KnowledgeChatbot'
 
-const API_URL = 'http://localhost:8000/analyze'
+const API_URL        = 'http://localhost:8000/analyze'
+const PDF_PREVIEW_URL = 'http://localhost:8000/preview-pdf'
+const PDF_GENERATE_URL = 'http://localhost:8000/generate-pdf'
 
 const PRIORITY_META = {
   high:     { label: 'High Priority',     color: 'var(--high)',     dot: '#fc8181' },
@@ -18,14 +20,24 @@ export default function AnalyzePage() {
   const inputRef   = useRef(null)
   const resultsRef = useRef(null)
 
-  const [file,     setFile]     = useState(null)
-  const [preview,  setPreview]  = useState(null)
-  const [dragging, setDragging] = useState(false)
-  const [loading,  setLoading]  = useState(false)
-  const [progress, setProgress] = useState('')
-  const [error,    setError]    = useState(null)
-  const [result,   setResult]   = useState(null)
-  const [lightbox, setLightbox] = useState(null)
+  const [file,         setFile]         = useState(null)
+  const [preview,      setPreview]      = useState(null)
+  const [dragging,     setDragging]     = useState(false)
+  const [loading,      setLoading]      = useState(false)
+  const [progress,     setProgress]     = useState('')
+  const [error,        setError]        = useState(null)
+  const [result,       setResult]       = useState(null)
+  const [lightbox,     setLightbox]     = useState(null)
+  const [pdfLoading,   setPdfLoading]   = useState(false)
+  const [sending,   setSending]   = useState(false)
+  const [sentMsg,   setSentMsg]   = useState('')
+  const [reportId,  setReportId]  = useState(null)
+
+  // ── PDF preview state ──────────────────────────────────────────────────────
+  const [pdfPages,        setPdfPages]        = useState([])   // base64 PNG strings
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
+  const [pdfPreviewError,   setPdfPreviewError]   = useState(null)
+  const [activeTab,         setActiveTab]         = useState('report') // 'report' | 'pdf'
 
   /* ── file selection ── */
   const handleFile = (f) => {
@@ -34,6 +46,7 @@ export default function AnalyzePage() {
     if (!ok) { setError('Please upload a JPEG or PNG image.'); return }
     setError(null)
     setResult(null)
+    setPdfPages([])
     setFile(f)
     setPreview(URL.createObjectURL(f))
   }
@@ -52,6 +65,9 @@ export default function AnalyzePage() {
     setLoading(true)
     setError(null)
     setResult(null)
+    setPdfPages([])
+    setReportId(null)
+    setSentMsg('')
 
     const steps = [
       'Uploading image…',
@@ -67,12 +83,19 @@ export default function AnalyzePage() {
     }, 4000)
 
     try {
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}')
       const form = new FormData()
-      form.append('file', file)
+      form.append('file',           file)
+      form.append('patient_name',   storedUser.name   || '')
+      form.append('patient_age',    String(storedUser.age    || ''))
+      form.append('patient_sex',    storedUser.gender || '')
+      form.append('patient_email',  storedUser.email  || '')
+
       const { data } = await axios.post(API_URL, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       setResult(data)
+      setReportId(data.report_id || null)
       clearInterval(interval)
       setLoading(false)
       setTimeout(() => {
@@ -88,8 +111,82 @@ export default function AnalyzePage() {
     }
   }
 
+  /* ── fetch PDF preview whenever result arrives ── */
+  useEffect(() => {
+    if (!result) return
+
+    const fetchPreview = async () => {
+      setPdfPreviewLoading(true)
+      setPdfPreviewError(null)
+      setPdfPages([])
+      try {
+        const { data } = await axios.post(PDF_PREVIEW_URL, {
+          report:        result.report,
+          gradcam_image: result.gradcam_image,
+          xray_image:    result.xray_image,
+          patient_email: JSON.parse(localStorage.getItem('user') || '{}').email || '',
+        })
+        setPdfPages(data.pages || [])
+      } catch (err) {
+        setPdfPreviewError('Could not load PDF preview.')
+      } finally {
+        setPdfPreviewLoading(false)
+      }
+    }
+
+    fetchPreview()
+  }, [result])
+
   const reset = () => {
     setFile(null); setPreview(null); setResult(null); setError(null)
+    setPdfPages([]); setPdfPreviewError(null); setActiveTab('report')
+  }
+
+  const handleDownloadPdf = async () => {
+    if (!result) return
+    setPdfLoading(true)
+    try {
+      const response = await axios.post(
+        PDF_GENERATE_URL,
+        {
+          report:        result.report,
+          gradcam_image: result.gradcam_image,
+          xray_image:    result.xray_image,
+          patient_email: JSON.parse(localStorage.getItem('user') || '{}').email || '',
+        },
+        { responseType: 'blob' }
+      )
+      const url      = window.URL.createObjectURL(new Blob([response.data]))
+      const link     = document.createElement('a')
+      link.href      = url
+      link.setAttribute('download', 'PneumaVision_Report.pdf')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      alert('PDF generation failed. Please try again.')
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  const sendToDoctor = async () => {
+    const storedUser = JSON.parse(localStorage.getItem('user') || '{}')
+    if (!reportId || !storedUser.email) return
+    setSending(true)
+    setSentMsg('')
+    try {
+      await axios.post('http://localhost:8000/doctor/send-report', {
+        report_id:     reportId,
+        patient_email: storedUser.email,
+      })
+      setSentMsg('✓ Sent to doctor!')
+    } catch (err) {
+      setSentMsg(err.response?.data?.detail || 'Failed to send.')
+    } finally {
+      setSending(false)
+    }
   }
 
   /* ── render ── */
@@ -117,10 +214,26 @@ export default function AnalyzePage() {
         <div className="ap-upload-view container">
           <div className="ap-header">
             <div className="ap-section-label">Chest X-Ray Analyzer</div>
-            <h1 className="ap-title">Upload &amp; Analyse</h1>
+
+            <h1 className="ap-title">Upload & Analyse</h1>
+
             <p className="ap-subtitle">
               Upload a chest X-ray image to receive AI-generated findings and a structured radiology report.
             </p>
+
+            <div className="ap-header-actions">
+              <button
+                className="ap-btn-reset"
+                onClick={() => navigate('/reports')}
+                style={{
+                  marginTop: '1rem',
+                  padding: '0.75rem 1.4rem',
+                  fontSize: '0.9rem'
+                }}
+              >
+                📋 View Previous Reports
+              </button>
+            </div>
           </div>
 
           <div
@@ -187,11 +300,11 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* ── RESULTS STATE: two-column layout ── */}
+      {/* ── RESULTS STATE ── */}
       {result && (
         <div className="ap-results-view" ref={resultsRef}>
 
-          {/* results header bar */}
+          {/* top bar */}
           <div className="ap-results-topbar">
             <div>
               <div className="ap-section-label">Analysis Complete</div>
@@ -199,18 +312,69 @@ export default function AnalyzePage() {
                 {result.num_findings} Finding{result.num_findings !== 1 ? 's' : ''} Detected
               </h2>
             </div>
-            <button className="ap-btn-reset" onClick={reset}>New Analysis</button>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <button
+                className="ap-btn-analyze"
+                style={{ minWidth: 'unset', padding: '0.65rem 1.5rem', fontSize: '0.85rem' }}
+                onClick={handleDownloadPdf}
+                disabled={pdfLoading}
+              >
+                {pdfLoading ? (
+                  <span className="ap-loading-row">
+                    <span className="ap-spinner" /> Generating PDF…
+                  </span>
+                ) : '⬇ Download PDF'}
+              </button>
+              {reportId && (
+                <button
+                  className="ap-btn-analyze"
+                  style={{ minWidth: 'unset', padding: '0.65rem 1.5rem', fontSize: '0.85rem',
+                          background: sentMsg.startsWith('✓') ? '#2d6a4f' : undefined }}
+                  onClick={sendToDoctor}
+                  disabled={sending || sentMsg.startsWith('✓')}
+                >
+                  {sending ? '📤 Sending…' : sentMsg.startsWith('✓') ? sentMsg : '📤 Send to Doctor'}
+                </button>
+              )}
+              <button
+                className="ap-btn-reset"
+                style={{ padding: '0.65rem 1.25rem', fontSize: '0.85rem' }}
+                onClick={() => navigate('/reports')}
+              >
+                📋 My Reports
+              </button>
+              <button className="ap-btn-reset" onClick={reset}>New Analysis</button>
+            </div>
+            {sentMsg && !sentMsg.startsWith('✓') && (
+              <div className="ap-error" style={{ marginTop: '0.5rem' }}>{sentMsg}</div>
+            )}
           </div>
 
-          {/* ── two columns ── */}
-          <div className="ap-results-grid">
+          {/* ── Tab switcher ── */}
+          <div className="ap-tabs">
+            <button
+              className={`ap-tab ${activeTab === 'report' ? 'ap-tab--active' : ''}`}
+              onClick={() => setActiveTab('report')}
+            >
+              📋 Interactive Report
+            </button>
+            <button
+              className={`ap-tab ${activeTab === 'pdf' ? 'ap-tab--active' : ''}`}
+              onClick={() => setActiveTab('pdf')}
+            >
+              📄 PDF Preview
+              {pdfPreviewLoading && <span className="ap-tab-spinner" />}
+            </button>
+          </div>
 
-            {/* LEFT: images stacked */}
-            <div className="ap-left-col">
+          {/* ── TAB: Interactive Report (original two-column layout) ── */}
+          {activeTab === 'report' && (
+            <div className="ap-results-grid">
 
-              {/* Grad-CAM — large */}
-              <div className="ap-img-card">
-                <div className="ap-img-label">Grad-CAM Visualisation</div>
+              {/* LEFT: images */}
+              <div className="ap-left-col">
+                <div className="ap-img-card">
+                  <div className="ap-img-label">Grad-CAM Visualisation</div>
                   <img
                     src={`data:image/png;base64,${result.gradcam_image}`}
                     alt="Grad-CAM"
@@ -218,108 +382,159 @@ export default function AnalyzePage() {
                     onClick={() => setLightbox(`data:image/png;base64,${result.gradcam_image}`)}
                     style={{ cursor: 'zoom-in' }}
                   />
+                </div>
+                <div className="ap-img-card">
+                  <div className="ap-img-label">Original X-Ray</div>
+                  <img
+                    src={preview}
+                    alt="Original X-Ray"
+                    className="ap-result-img ap-result-img--original"
+                  />
+                </div>
               </div>
 
-              {/* Original X-Ray — below */}
-              <div className="ap-img-card">
-                <div className="ap-img-label">Original X-Ray</div>
-                <img
-                  src={preview}
-                  alt="Original X-Ray"
-                  className="ap-result-img ap-result-img--original"
+              {/* RIGHT: report content */}
+              <div className="ap-right-col">
+
+                <div className="ap-section-block">
+                  <h3 className="ap-block-title">Findings</h3>
+                  {result.report.findings?.length > 0 ? (
+                    <div className="ap-findings">
+                      {result.report.findings.map((f, i) => {
+                        const pm = PRIORITY_META[f.clinical_priority] || PRIORITY_META.low
+                        return (
+                          <div className="ap-finding-card" key={i}>
+                            <div className="ap-finding-top">
+                              <span className="ap-finding-name">{f.condition}</span>
+                              <span className="ap-finding-priority" style={{ color: pm.color, borderColor: pm.color }}>
+                                <span className="ap-finding-dot" style={{ background: pm.dot }} />
+                                {pm.label}
+                              </span>
+                            </div>
+                            <div className="ap-finding-meta">
+                              <div className="ap-finding-meta-item">
+                                <span className="ap-meta-label">Confidence</span>
+                                <div className="ap-conf-bar-wrap">
+                                  <div
+                                    className="ap-conf-bar"
+                                    style={{ width: `${(f.confidence * 100).toFixed(1)}%`, background: pm.dot }}
+                                  />
+                                </div>
+                                <span className="ap-meta-val">{(f.confidence * 100).toFixed(1)}%</span>
+                              </div>
+                              <div className="ap-finding-meta-item">
+                                <span className="ap-meta-label">Location</span>
+                                <span className="ap-meta-val ap-meta-location">{f.anatomical_location}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="ap-no-findings">No findings above threshold detected.</p>
+                  )}
+                </div>
+
+                {result.report.not_detected?.length > 0 && (
+                  <div className="ap-section-block">
+                    <h3 className="ap-block-title">Not Detected</h3>
+                    <div className="ap-not-detected-grid">
+                      {result.report.not_detected.map((nd, i) => (
+                        <div className="ap-nd-chip" key={i}>
+                          <span className="ap-nd-name">{nd.condition}</span>
+                          <span className="ap-nd-score">{(nd.raw_score * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {result.report.impression && (
+                  <div className="ap-section-block ap-impression-block">
+                    <h3 className="ap-block-title">Radiologist Impression</h3>
+                    <blockquote className="ap-impression">
+                      {result.report.impression}
+                    </blockquote>
+                  </div>
+                )}
+
+                {result.report.disclaimer && (
+                  <div className="ap-disclaimer">
+                    <span className="ap-disclaimer-icon">⚠</span>
+                    {result.report.disclaimer}
+                  </div>
+                )}
+
+                <ReportChatbot
+                  report={result.report}
+                  gradcamImage={result.gradcam_image}
+                  xrayImage={result.xray_image}
                 />
               </div>
-
             </div>
+          )}
 
-            {/* RIGHT: full report */}
-            <div className="ap-right-col">
+          {/* ── TAB: PDF Preview ── */}
+          {activeTab === 'pdf' && (
+            <div className="ap-pdf-preview">
+              {pdfPreviewLoading && (
+                <div className="ap-pdf-loading">
+                  <span className="ap-spinner ap-spinner--lg" />
+                  <p>Rendering PDF preview…</p>
+                </div>
+              )}
 
-              {/* findings */}
-              <div className="ap-section-block">
-                <h3 className="ap-block-title">Findings</h3>
-                {result.report.findings?.length > 0 ? (
-                  <div className="ap-findings">
-                    {result.report.findings.map((f, i) => {
-                      const pm = PRIORITY_META[f.clinical_priority] || PRIORITY_META.low
-                      return (
-                        <div className="ap-finding-card" key={i}>
-                          <div className="ap-finding-top">
-                            <span className="ap-finding-name">{f.condition}</span>
-                            <span className="ap-finding-priority" style={{ color: pm.color, borderColor: pm.color }}>
-                              <span className="ap-finding-dot" style={{ background: pm.dot }} />
-                              {pm.label}
-                            </span>
-                          </div>
-                          <div className="ap-finding-meta">
-                            <div className="ap-finding-meta-item">
-                              <span className="ap-meta-label">Confidence</span>
-                              <div className="ap-conf-bar-wrap">
-                                <div
-                                  className="ap-conf-bar"
-                                  style={{ width: `${(f.confidence * 100).toFixed(1)}%`, background: pm.dot }}
-                                />
-                              </div>
-                              <span className="ap-meta-val">{(f.confidence * 100).toFixed(1)}%</span>
-                            </div>
-                            <div className="ap-finding-meta-item">
-                              <span className="ap-meta-label">Location</span>
-                              <span className="ap-meta-val ap-meta-location">{f.anatomical_location}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })}
+              {pdfPreviewError && !pdfPreviewLoading && (
+                <div className="ap-pdf-error">
+                  <span>⚠ {pdfPreviewError}</span>
+                  <p style={{ fontSize: '0.8rem', marginTop: '0.5rem', opacity: 0.7 }}>
+                    Make sure PyMuPDF (fitz) is installed on the backend: <code>pip install pymupdf</code>
+                  </p>
+                </div>
+              )}
+
+              {!pdfPreviewLoading && !pdfPreviewError && pdfPages.length > 0 && (
+                <>
+                  <div className="ap-pdf-toolbar">
+                    <span className="ap-pdf-page-count">{pdfPages.length} page{pdfPages.length !== 1 ? 's' : ''}</span>
+                    <button
+                      className="ap-btn-analyze"
+                      style={{ minWidth: 'unset', padding: '0.5rem 1.25rem', fontSize: '0.82rem' }}
+                      onClick={handleDownloadPdf}
+                      disabled={pdfLoading}
+                    >
+                      {pdfLoading ? (
+                        <span className="ap-loading-row"><span className="ap-spinner" /> Generating…</span>
+                      ) : '⬇ Download PDF'}
+                    </button>
                   </div>
-                ) : (
-                  <p className="ap-no-findings">No findings above threshold detected.</p>
-                )}
-              </div>
 
-              {/* not detected */}
-              {result.report.not_detected?.length > 0 && (
-                <div className="ap-section-block">
-                  <h3 className="ap-block-title">Not Detected</h3>
-                  <div className="ap-not-detected-grid">
-                    {result.report.not_detected.map((nd, i) => (
-                      <div className="ap-nd-chip" key={i}>
-                        <span className="ap-nd-name">{nd.condition}</span>
-                        <span className="ap-nd-score">{(nd.raw_score * 100).toFixed(1)}%</span>
+                  <div className="ap-pdf-pages">
+                    {pdfPages.map((page, i) => (
+                      <div className="ap-pdf-page-wrap" key={i}>
+                        <div className="ap-pdf-page-label">Page {i + 1}</div>
+                        <img
+                          src={`data:image/png;base64,${page}`}
+                          alt={`Report page ${i + 1}`}
+                          className="ap-pdf-page-img"
+                          onClick={() => setLightbox(`data:image/png;base64,${page}`)}
+                          style={{ cursor: 'zoom-in' }}
+                        />
                       </div>
                     ))}
                   </div>
-                </div>
+                </>
               )}
-
-              {/* impression */}
-              {result.report.impression && (
-                <div className="ap-section-block ap-impression-block">
-                  <h3 className="ap-block-title">Radiologist Impression</h3>
-                  <blockquote className="ap-impression">
-                    {result.report.impression}
-                  </blockquote>
-                </div>
-              )}
-
-              {/* disclaimer */}
-              {result.report.disclaimer && (
-                <div className="ap-disclaimer">
-                  <span className="ap-disclaimer-icon">⚠</span>
-                  {result.report.disclaimer}
-                </div>
-              )}
-
-              {/* report chatbot */}
-              <ReportChatbot report={result.report} />
-
             </div>
-          </div>
+          )}
+
         </div>
       )}
 
       {lightbox && (
         <div className="ap-lightbox" onClick={() => setLightbox(null)}>
-          <img src={lightbox} alt="Grad-CAM fullscreen" className="ap-lightbox-img" />
+          <img src={lightbox} alt="Fullscreen" className="ap-lightbox-img" />
           <button className="ap-lightbox-close">✕</button>
         </div>
       )}

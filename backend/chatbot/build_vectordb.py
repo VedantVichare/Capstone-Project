@@ -1,39 +1,18 @@
-"""
-build_vectordb.py  —  Run this ONCE to build the persistent vector database.
------------------------------------------------------------------------------
-What it does:
-  1. Loads knowledge_base.txt
-  2. Splits it into overlapping chunks
-  3. Embeds each chunk using sentence-transformers (local, free, no API key)
-  4. Saves everything to disk in ./chroma_db/
-
-After running this once, the chroma_db/ folder persists on disk.
-The RAG chain loads from it directly — no re-embedding ever needed.
-
-Run with:
-    python build_vectordb.py
-"""
-
 from pathlib import Path
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR   = Path(__file__).parent                  # chatbot/ folder
 KB_PATH = BASE_DIR / "Knowledge Base.pdf"
 CHROMA_DIR = str(BASE_DIR / "chroma_db")            # where DB is saved to disk
 
-# ── Chunking config ───────────────────────────────────────────────────────────
-# chunk_size    : max characters per chunk (~120 words, good for one topic section)
-# chunk_overlap : characters shared between adjacent chunks so context isn't lost
+
 CHUNK_SIZE    = 800
 CHUNK_OVERLAP = 120
 
-# ── Embedding model ───────────────────────────────────────────────────────────
-# all-MiniLM-L6-v2: fast, lightweight, works well for medical/clinical text
-# Downloaded automatically on first run, cached locally afterward
+
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 

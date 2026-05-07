@@ -22,7 +22,7 @@ const AUDIENCE = [
   { icon: '👤', who: 'Patients',     desc: 'Understand your own X-ray results without waiting days. Plain-English explanations of every finding detected.' },
 ]
 
-export default function LandingPage() {
+export default function LandingPage({ onLogout }) {
   const navigate = useNavigate()
   const orbRef   = useRef(null)
 
@@ -48,15 +48,23 @@ export default function LandingPage() {
       </div>
 
       {/* ── sticky nav ── */}
-      <nav className="lp-nav">
-        <div className="lp-nav-logo">
-          <span className="lp-cross">✚</span> PneumaVision
-        </div>
-        <button className="lp-nav-btn" onClick={() => navigate('/analyze')}>
-          Analyze Your X-Ray
-        </button>
-      </nav>
-
+<nav className="lp-nav">
+  <div className="lp-nav-logo">
+    <span className="lp-cross">✚</span> PneumaVision
+  </div>
+  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+    <button className="lp-nav-btn" onClick={() => navigate('/analyze')}>
+      Analyze Your X-Ray
+    </button>
+    <button
+      className="lp-nav-btn"
+      onClick={onLogout}
+      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: '#a0aec0' }}
+    >
+      Log Out
+    </button>
+  </div>
+</nav>
       {/* ════════════════════════════════════════
           FOLD 1 — Hero + Conditions
       ════════════════════════════════════════ */}

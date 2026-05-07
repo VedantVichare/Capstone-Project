@@ -285,7 +285,7 @@ def print_report(report: dict):
 # Main pipeline
 # -------------------------------------------------------------------
 
-def run_pipeline(image_path: str, json_input, output_path: str = "report.json") -> dict:
+def run_pipeline(image_path: str, json_input, output_path: str = "report.json", patient_info_override: dict = None) -> dict:
     if not API_KEY:
         print("ERROR: GEMINI_API_KEY not found in environment / .env file.")
         sys.exit(1)
@@ -330,6 +330,13 @@ def run_pipeline(image_path: str, json_input, output_path: str = "report.json") 
     # Step 5 — Parse and save
     print("[5/5] Parsing and saving report...")
     report = parse_json_response(raw_response)
+
+
+    # Inject real patient info if provided
+    if patient_info_override:
+        report.setdefault("patient_info", {})
+        report["patient_info"].update({k: v for k, v in patient_info_override.items() if v and v != "N/A"})
+
     with open(output_path, "w") as f:
         json.dump(report, f, indent=2)
     print(f"  Saved to: {output_path}")

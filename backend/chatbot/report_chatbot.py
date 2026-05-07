@@ -1,10 +1,3 @@
-"""
-report_chat.py  —  Report-scoped chatbot
------------------------------------------
-Takes the full report JSON + a user question and returns an answer
-grounded strictly in the report findings. No external knowledge used.
-"""
-
 import json
 import os
 import google.generativeai as genai
@@ -52,17 +45,6 @@ Answer based strictly on the report above."""
 
 
 def ask_report_chatbot(report: dict, question: str, history: list[dict]) -> str:
-    """
-    Parameters
-    ----------
-    report   : the full report dict returned by run_pipeline()
-    question : the user's latest message
-    history  : list of previous turns, each {"role": "user"|"model", "parts": [str]}
-
-    Returns
-    -------
-    The assistant's reply as a plain string.
-    """
     if not API_KEY:
         raise ValueError("GEMINI_API_KEY not set in environment / .env file.")
 
