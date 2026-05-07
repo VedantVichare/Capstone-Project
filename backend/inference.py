@@ -11,7 +11,8 @@ from pathlib import Path
 import json
 
 # --- Config ---
-WEIGHTS = Path(r"NIH model\best_model.pt")
+# WEIGHTS = Path(r"NIH model\best_model.pt")
+WEIGHTS = Path(__file__).parent / "NIH model" / "best_model.pt"
 IMG_SIZE = 320
 SCORE_THRESHOLD = 0.5
 CAM_THRESHOLD = 0.5
