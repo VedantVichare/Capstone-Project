@@ -5,9 +5,9 @@ import './AnalyzePage.css'
 import ReportChatbot from '../components/ReportChatbot'
 import KnowledgeChatbot from '../components/KnowledgeChatbot'
 
-const API_URL        = 'http://localhost:8000/analyze'
-const PDF_PREVIEW_URL = 'http://localhost:8000/preview-pdf'
-const PDF_GENERATE_URL = 'http://localhost:8000/generate-pdf'
+const API_URL        = '${import.meta.env.VITE_API_URL}/analyze'
+const PDF_PREVIEW_URL = '${import.meta.env.VITE_API_URL}/preview-pdf'
+const PDF_GENERATE_URL = '${import.meta.env.VITE_API_URL}/generate-pdf'
 
 const PRIORITY_META = {
   high:     { label: 'High Priority',     color: 'var(--high)',     dot: '#fc8181' },

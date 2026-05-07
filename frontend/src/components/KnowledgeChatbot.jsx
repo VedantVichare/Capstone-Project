@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import './KnowledgeChatbot.css'
 
-const API_URL = 'http://localhost:8000/knowledge-chat'
+const API_URL = '${import.meta.env.VITE_API_URL}/knowledge-chat'
 
 const SUGGESTIONS = [
   'What is Cardiomegaly?',

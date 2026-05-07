@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import axios from 'axios'
 import './ReportChatbot.css'
 
-const API_URL = 'http://localhost:8000/report-chat'
+// const API_URL = 'http://localhost:8000/report-chat'
+const API_URL = '${import.meta.env.VITE_API_URL}/report-chat'
 
 const SUGGESTIONS = [
   'What conditions were detected?',
