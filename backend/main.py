@@ -1,4 +1,6 @@
-import pdf2image
+import matplotlib
+matplotlib.use("Agg")
+
 import base64
 import json
 import os
@@ -6,26 +8,24 @@ import tempfile
 import traceback
 from io import BytesIO
 from pathlib import Path
-from datetime import datetime          # ← NEW
-import matplotlib
-matplotlib.use("Agg")
-from auth import router as auth_router
-from database import reports_collection  # ← NEW
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException   # ← added Form
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse         # ← added StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 import uvicorn
 from pydantic import BaseModel
 
+from auth import router as auth_router
+from database import reports_collection
 import inference as inf
 import report_generation as rg
 from chatbot.report_chatbot import ask_report_chatbot
-from chatbot.rag_chain import ask_knowledge_chatbot, _load_resources
+from chatbot.rag_chain import ask_knowledge_chatbot
 from xray_validation import validate_chest_xray
 from doctor_routes import router as doctor_router, seed_doctor
 
@@ -54,8 +54,8 @@ class KnowledgeChatRequest(BaseModel):
 
 class PDFRequest(BaseModel):
     report:        dict
-    gradcam_image: str        # base64
-    xray_image:    str        # base64
+    gradcam_image: str
+    xray_image:    str
     patient_email: str = ""
 
 
@@ -107,40 +107,24 @@ async def root():
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
 def build_pdf(report: dict, gradcam_b64: str, xray_b64: str) -> bytes:
-    """Build a professional PDF report and return as bytes."""
-    buf = BytesIO()
-
-    # A4 usable width = 21cm - 2cm*2 margins = 17cm
+    buf   = BytesIO()
     PAGE_W = 17 * cm
 
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=2*cm, rightMargin=2*cm,
-        topMargin=1.5*cm, bottomMargin=2*cm      # slightly less top margin
+        topMargin=1.5*cm, bottomMargin=2*cm
     )
 
     styles = getSampleStyleSheet()
     story  = []
 
-    # ── colour palette ────────────────────────────────────────────────────
-    TEAL  = colors.HexColor("#00BCD4")
-    GRAY  = colors.HexColor("#8b949e")
-    HIGH  = colors.HexColor("#fc8181")
-    MOD   = colors.HexColor("#f6ad55")
-    LOW   = colors.HexColor("#68d391")
+    TEAL = colors.HexColor("#00BCD4")
+    GRAY = colors.HexColor("#8b949e")
+    HIGH = colors.HexColor("#fc8181")
+    MOD  = colors.HexColor("#f6ad55")
+    LOW  = colors.HexColor("#68d391")
 
-    title_style = ParagraphStyle(
-        "Title", parent=styles["Normal"],
-        fontSize=24, textColor=TEAL,
-        spaceBefore=0, spaceAfter=6,             # gap BELOW title
-        fontName="Helvetica-Bold", alignment=TA_CENTER
-    )
-    sub_style = ParagraphStyle(
-        "Sub", parent=styles["Normal"],
-        fontSize=10, textColor=GRAY,
-        alignment=TA_CENTER,
-        spaceBefore=0, spaceAfter=14             # gap between subtitle and rule
-    )
     section_style = ParagraphStyle(
         "Section", parent=styles["Normal"],
         fontSize=11, textColor=TEAL,
@@ -166,16 +150,14 @@ def build_pdf(report: dict, gradcam_b64: str, xray_b64: str) -> bytes:
         fontSize=8, textColor=colors.HexColor("#e53e3e"),
         leading=12, spaceAfter=4
     )
-
-    # ── Header ────────────────────────────────────────────────────────────
     header_style = ParagraphStyle(
         "Header", parent=styles["Normal"],
         fontSize=24, textColor=TEAL,
         spaceBefore=0, spaceAfter=16,
         fontName="Helvetica-Bold", alignment=TA_CENTER,
-        leading=36                           
+        leading=36
     )
- 
+
     story.append(Paragraph(
         '&#10010; PneumaVision<br/>'
         '<font name="Helvetica" size="10" color="#8b949e">AI Chest X-Ray Analysis Report</font>',
@@ -183,43 +165,35 @@ def build_pdf(report: dict, gradcam_b64: str, xray_b64: str) -> bytes:
     ))
     story.append(HRFlowable(width="100%", thickness=1, color=TEAL, spaceAfter=12))
 
-    # ── Patient Info ──────────────────────────────────────────────────────
     pi = report.get("patient_info", {})
     story.append(Paragraph("PATIENT INFORMATION", section_style))
 
     patient_data = [
-        ["Patient Name", pi.get("patient_id") or "N/A",
-         "Study ID",     pi.get("study") or "N/A"],
-        ["Age",          str(pi.get("age") or "N/A"),
-         "Sex",          str(pi.get("sex") or "N/A")],
-        ["Report Date",  datetime.now().strftime("%d %b %Y, %H:%M"),
-         "View",         str(pi.get("view") or "N/A")],
+        ["Patient Name", pi.get("patient_id") or "N/A", "Study ID", pi.get("study") or "N/A"],
+        ["Age",          str(pi.get("age") or "N/A"),   "Sex",      str(pi.get("sex") or "N/A")],
+        ["Report Date",  datetime.now().strftime("%d %b %Y, %H:%M"), "View", str(pi.get("view") or "N/A")],
     ]
     pt = Table(patient_data, colWidths=[3.5*cm, 5*cm, 3.5*cm, 5*cm])
     pt.setStyle(TableStyle([
-        ("BACKGROUND",  (0,0),(-1,-1), colors.HexColor("#f7fafc")),
-        ("TEXTCOLOR",   (0,0),(0,-1),  GRAY),
-        ("TEXTCOLOR",   (2,0),(2,-1),  GRAY),
-        ("FONTNAME",    (0,0),(0,-1),  "Helvetica-Bold"),
-        ("FONTNAME",    (2,0),(2,-1),  "Helvetica-Bold"),
-        ("FONTSIZE",    (0,0),(-1,-1), 9),
-        ("GRID",        (0,0),(-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-        ("PADDING",     (0,0),(-1,-1), 6),
+        ("BACKGROUND", (0,0),(-1,-1), colors.HexColor("#f7fafc")),
+        ("TEXTCOLOR",  (0,0),(0,-1),  GRAY),
+        ("TEXTCOLOR",  (2,0),(2,-1),  GRAY),
+        ("FONTNAME",   (0,0),(0,-1),  "Helvetica-Bold"),
+        ("FONTNAME",   (2,0),(2,-1),  "Helvetica-Bold"),
+        ("FONTSIZE",   (0,0),(-1,-1), 9),
+        ("GRID",       (0,0),(-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+        ("PADDING",    (0,0),(-1,-1), 6),
     ]))
     story.append(pt)
     story.append(Spacer(1, 10))
 
-    # ── Images — stacked vertically, full usable width ────────────────────
     story.append(Paragraph("IMAGES", section_style))
 
-    def b64_to_rl_image(b64str: str, w: float, h: float):
-        """Decode base64 and return a ReportLab Image at the given cm dimensions."""
+    def b64_to_rl_image(b64str, w, h):
         raw = base64.b64decode(b64str)
-        bio = BytesIO(raw)
-        return RLImage(bio, width=w, height=h)
+        return RLImage(BytesIO(raw), width=w, height=h)
 
-    # Helper: compute height that preserves aspect ratio at a given width
-    def aspect_height(b64str: str, target_w: float) -> float:
+    def aspect_height(b64str, target_w):
         try:
             raw = base64.b64decode(b64str)
             from PIL import Image as PILImage
@@ -227,104 +201,83 @@ def build_pdf(report: dict, gradcam_b64: str, xray_b64: str) -> bytes:
             w_px, h_px = img.size
             return target_w * h_px / w_px
         except Exception:
-            return target_w * 0.75   # fallback 4:3
+            return target_w * 0.75
 
     try:
-        img_w = PAGE_W                          # full usable width
-
-        # ── Original X-Ray ────────────────────────────────────────────────
-        xray_h = aspect_height(xray_b64, img_w)
-        xray_h = min(xray_h, 11*cm)            # cap so it doesn't take the whole page
-        xray_img = b64_to_rl_image(xray_b64, img_w, xray_h)
-
+        img_w  = PAGE_W
+        xray_h = min(aspect_height(xray_b64, img_w), 11*cm)
         story.append(Paragraph("Original X-Ray", img_label_style))
-
-        xray_wrap = Table([[xray_img]], colWidths=[img_w])
+        xray_wrap = Table([[b64_to_rl_image(xray_b64, img_w, xray_h)]], colWidths=[img_w])
         xray_wrap.setStyle(TableStyle([
-            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
-            ("PADDING",    (0,0), (-1,-1), 0),
-            ("BOX",        (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-            ("BACKGROUND", (0,0), (-1,-1), colors.white),
+            ("ALIGN",      (0,0),(-1,-1), "CENTER"),
+            ("PADDING",    (0,0),(-1,-1), 0),
+            ("BOX",        (0,0),(-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+            ("BACKGROUND", (0,0),(-1,-1), colors.white),
         ]))
         story.append(xray_wrap)
         story.append(Spacer(1, 10))
 
-        # ── Grad-CAM ──────────────────────────────────────────────────────
-        gcam_h = aspect_height(gradcam_b64, img_w)
-        gcam_h = min(gcam_h, 11*cm)
-        gcam_img = b64_to_rl_image(gradcam_b64, img_w, gcam_h)
-
+        gcam_h = min(aspect_height(gradcam_b64, img_w), 11*cm)
         story.append(Paragraph("Grad-CAM Visualisation", img_label_style))
-
-        gcam_wrap = Table([[gcam_img]], colWidths=[img_w])
+        gcam_wrap = Table([[b64_to_rl_image(gradcam_b64, img_w, gcam_h)]], colWidths=[img_w])
         gcam_wrap.setStyle(TableStyle([
-            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
-            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
-            ("PADDING",    (0,0), (-1,-1), 0),
-            ("BOX",        (0,0), (-1,-1), 0.5, colors.HexColor("#e2e8f0")),
-            ("BACKGROUND", (0,0), (-1,-1), colors.white),
+            ("ALIGN",      (0,0),(-1,-1), "CENTER"),
+            ("PADDING",    (0,0),(-1,-1), 0),
+            ("BOX",        (0,0),(-1,-1), 0.5, colors.HexColor("#e2e8f0")),
+            ("BACKGROUND", (0,0),(-1,-1), colors.white),
         ]))
         story.append(gcam_wrap)
-
     except Exception:
         story.append(Paragraph("(Images could not be embedded)", small_style))
 
     story.append(Spacer(1, 10))
 
-    # ── Findings ──────────────────────────────────────────────────────────
     findings = report.get("findings", [])
     if findings:
         story.append(Paragraph("FINDINGS", section_style))
-        priority_color = {"high": HIGH, "moderate": MOD, "low": LOW}
-
         f_data = [["Condition", "Confidence", "Priority", "Location"]]
         for f in findings:
             f_data.append([
-                f.get("condition",""),
-                f"{float(f.get('confidence',0))*100:.1f}%",
-                f.get("clinical_priority","").capitalize(),
-                Paragraph(f.get("anatomical_location",""), small_style),
+                f.get("condition", ""),
+                f"{float(f.get('confidence', 0))*100:.1f}%",
+                f.get("clinical_priority", "").capitalize(),
+                Paragraph(f.get("anatomical_location", ""), small_style),
             ])
-
         ft = Table(f_data, colWidths=[3.5*cm, 2.5*cm, 3*cm, 8*cm])
         ft.setStyle(TableStyle([
-            ("BACKGROUND",  (0,0),(-1,0),  colors.HexColor("#edf2f7")),
-            ("FONTNAME",    (0,0),(-1,0),  "Helvetica-Bold"),
-            ("FONTSIZE",    (0,0),(-1,-1), 8.5),
-            ("GRID",        (0,0),(-1,-1), 0.4, colors.HexColor("#e2e8f0")),
-            ("PADDING",     (0,0),(-1,-1), 5),
-            ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white, colors.HexColor("#f7fafc")]),
+            ("BACKGROUND",     (0,0),(-1,0),  colors.HexColor("#edf2f7")),
+            ("FONTNAME",       (0,0),(-1,0),  "Helvetica-Bold"),
+            ("FONTSIZE",       (0,0),(-1,-1), 8.5),
+            ("GRID",           (0,0),(-1,-1), 0.4, colors.HexColor("#e2e8f0")),
+            ("PADDING",        (0,0),(-1,-1), 5),
+            ("ROWBACKGROUNDS", (0,1),(-1,-1), [colors.white, colors.HexColor("#f7fafc")]),
         ]))
         story.append(ft)
         story.append(Spacer(1, 8))
 
-    # ── Not Detected ──────────────────────────────────────────────────────
     not_detected = report.get("not_detected", [])
     if not_detected:
         story.append(Paragraph("NOT DETECTED (below threshold)", section_style))
         nd_text = "  |  ".join(
-            f"{nd['condition']} ({float(nd.get('raw_score',0))*100:.1f}%)"
+            f"{nd['condition']} ({float(nd.get('raw_score', 0))*100:.1f}%)"
             for nd in not_detected
         )
         story.append(Paragraph(nd_text, small_style))
         story.append(Spacer(1, 8))
 
-    # ── Impression ────────────────────────────────────────────────────────
-    impression = report.get("impression","")
+    impression = report.get("impression", "")
     if impression:
         story.append(Paragraph("RADIOLOGIST IMPRESSION", section_style))
         story.append(Paragraph(impression, body_style))
         story.append(Spacer(1, 8))
 
-    # ── Disclaimer ────────────────────────────────────────────────────────
-    disclaimer = report.get("disclaimer","")
+    disclaimer = report.get("disclaimer", "")
     story.append(HRFlowable(width="100%", thickness=0.5, color=GRAY, spaceAfter=6))
     story.append(Paragraph(
-        "&#9888; " + (disclaimer or "This report was generated by an AI model and is intended for "
-                 "informational purposes only. It does not constitute a medical diagnosis or "
-                 "professional clinical advice. All findings must be reviewed and verified by "
-                 "a qualified radiologist."),
+        "&#9888; " + (disclaimer or
+            "This report was generated by an AI model and is intended for informational "
+            "purposes only. It does not constitute a medical diagnosis or professional "
+            "clinical advice. All findings must be reviewed and verified by a qualified radiologist."),
         disclaimer_style
     ))
 
@@ -335,11 +288,11 @@ def build_pdf(report: dict, gradcam_b64: str, xray_b64: str) -> bytes:
 # ── Main analysis endpoint ────────────────────────────────────────────────────
 @app.post("/analyze", tags=["Analysis"])
 async def analyze(
-    file:           UploadFile = File(...),
-    patient_name:   str = Form(""),       # ← NEW
-    patient_age:    str = Form(""),       # ← NEW
-    patient_sex:    str = Form(""),       # ← NEW
-    patient_email:  str = Form(""),       # ← NEW
+    file:          UploadFile = File(...),
+    patient_name:  str = Form(""),
+    patient_age:   str = Form(""),
+    patient_sex:   str = Form(""),
+    patient_email: str = Form(""),
 ):
     validate_upload(file)
     raw_bytes = await file.read()
@@ -360,8 +313,9 @@ async def analyze(
             detail=f"Not a chest X-ray. Reason: {validation['reason']}."
         )
 
-    suffix = Path(file.filename).suffix if file.filename else ".png"
-    xray_b64 = base64.b64encode(raw_bytes).decode("utf-8")  # ← save original for PDF
+    suffix   = Path(file.filename).suffix if file.filename else ".png"
+    xray_b64 = base64.b64encode(raw_bytes).decode("utf-8")
+    insert_result = None  # ← fix: always defined
 
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=tempfile.gettempdir()) as tmp:
@@ -372,15 +326,14 @@ async def analyze(
 
         inference_result = inf.run_inference(str(tmp_path_obj), save_visualization=True)
 
-        gradcam_b64: str | None = None
+        gradcam_b64 = None
         viz_path = inference_result.get("visualization_path")
         if viz_path and Path(viz_path).exists():
             gradcam_b64 = file_to_base64(viz_path)
         else:
-            orig_pil = Image.open(BytesIO(raw_bytes)).convert("RGB")
+            orig_pil    = Image.open(BytesIO(raw_bytes)).convert("RGB")
             gradcam_b64 = pil_to_base64(orig_pil)
 
-        # ── Patient info to inject ────────────────────────────────────────
         patient_info_override = {
             "patient_id": patient_name or "N/A",
             "age":        patient_age  or "N/A",
@@ -391,31 +344,30 @@ async def analyze(
             image_path=str(tmp_path_obj),
             json_input=inference_result,
             output_path=str(tmp_path_obj.with_name(tmp_path_obj.stem + "_report.json")),
-            patient_info_override=patient_info_override,   # ← NEW param
+            patient_info_override=patient_info_override,
         )
 
-        # ── Store in MongoDB ──────────────────────────────────────────────
         if patient_email:
             report_doc = {
-                "email":       patient_email,
-                "name":        patient_name,
-                "age":         patient_age,
-                "sex":         patient_sex,
-                "report":      report,
-                "xray_image":  xray_b64,
+                "email":         patient_email,
+                "name":          patient_name,
+                "age":           patient_age,
+                "sex":           patient_sex,
+                "report":        report,
+                "xray_image":    xray_b64,
                 "gradcam_image": gradcam_b64,
-                "filename":    file.filename,
-                "created_at":  datetime.utcnow(),
+                "filename":      file.filename,
+                "created_at":    datetime.utcnow(),
             }
             insert_result = reports_collection.insert_one(report_doc)
 
         return JSONResponse(content={
             "gradcam_image": gradcam_b64,
-            "xray_image":    xray_b64,      # ← NEW: send back for PDF
+            "xray_image":    xray_b64,
             "report":        report,
             "num_findings":  inference_result["num_findings"],
             "predictions":   inference_result["predictions"],
-            "report_id":     str(insert_result.inserted_id) if patient_email else None,
+            "report_id":     str(insert_result.inserted_id) if insert_result else None,
         })
 
     except HTTPException:
@@ -436,14 +388,13 @@ async def analyze(
                 pass
 
 
-# ── PDF generation endpoint ───────────────────────────────────────────────────
+# ── PDF endpoints ─────────────────────────────────────────────────────────────
 @app.post("/generate-pdf", tags=["Report"])
 async def generate_pdf(req: PDFRequest):
-    """Generate and return a PDF report as a downloadable file."""
     try:
-        pdf_bytes = build_pdf(req.report, req.gradcam_image, req.xray_image)
+        pdf_bytes    = build_pdf(req.report, req.gradcam_image, req.xray_image)
         patient_name = req.report.get("patient_info", {}).get("patient_id", "report")
-        filename = f"PneumaVision_{patient_name.replace(' ','_')}.pdf"
+        filename     = f"PneumaVision_{patient_name.replace(' ','_')}.pdf"
         return StreamingResponse(
             BytesIO(pdf_bytes),
             media_type="application/pdf",
@@ -456,43 +407,30 @@ async def generate_pdf(req: PDFRequest):
 
 @app.post("/preview-pdf", tags=["Report"])
 async def preview_pdf(req: PDFRequest):
-    """
-    Generate PDF and return each page as a base64 PNG.
-    Uses PyMuPDF (fitz) — no poppler or external tools needed.
-    """
     try:
-        import fitz  # PyMuPDF
-
+        import fitz
         pdf_bytes = build_pdf(req.report, req.gradcam_image, req.xray_image)
-
         doc   = fitz.open(stream=pdf_bytes, filetype="pdf")
         pages = []
-
         for page in doc:
-            # Render at 2x zoom for sharp display (150 DPI equivalent)
-            mat  = fitz.Matrix(2.0, 2.0)
-            pix  = page.get_pixmap(matrix=mat, alpha=False)
-            png  = pix.tobytes("png")
-            pages.append(base64.b64encode(png).decode("utf-8"))
-
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            pages.append(base64.b64encode(pix.tobytes("png")).decode("utf-8"))
         doc.close()
         return JSONResponse(content={"pages": pages})
-
     except Exception as exc:
         traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"PDF preview failed: {str(exc)}"
-        )
+        raise HTTPException(status_code=500, detail=f"PDF preview failed: {str(exc)}")
 
+
+# ── Startup — only seed doctor, do NOT load heavy models ─────────────────────
 @app.on_event("startup")
 async def startup_event():
-    print("[startup] Loading RAG knowledge base...")
-    _load_resources()
-    print("[startup] RAG knowledge base ready")
     seed_doctor()
+    print("[startup] Server ready.")
 
 
+# ── Chatbot endpoints ─────────────────────────────────────────────────────────
 @app.post("/report-chat", tags=["Chatbot"])
 async def report_chat(req: ReportChatRequest):
     try:
