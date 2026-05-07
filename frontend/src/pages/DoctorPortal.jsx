@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './DoctorPortal.css'
 
-const API = 'http://localhost:8000'
+const API = '${import.meta.env.VITE_API_URL}'
 
 const PRIORITY_META = {
   high:     { label: 'High',     color: '#fc8181' },

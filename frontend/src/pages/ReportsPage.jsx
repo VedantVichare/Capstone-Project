@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import './ReportsPage.css'
 
-const API = 'http://localhost:8000'
+const API = '${import.meta.env.VITE_API_URL}'
 
 export default function ReportsPage() {
   const navigate  = useNavigate()
