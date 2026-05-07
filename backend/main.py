@@ -7,7 +7,8 @@ import traceback
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime          # ← NEW
-
+import matplotlib
+matplotlib.use("Agg")
 from auth import router as auth_router
 from database import reports_collection  # ← NEW
 import logging
